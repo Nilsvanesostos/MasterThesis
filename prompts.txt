@@ -1,0 +1,14 @@
+python SMGM_uncond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 2e-3 --dataset mnist --checkpoint_dir "./checkpoints/unconditional/SM/mnist/" --schedule "linear"
+python SMGM_uncond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 1e-4 --dataset cifar10 --checkpoint_dir "./checkpoints/unconditional/SM/cifar10/" --schedule "cosine"
+python SMGM_cond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 2e-3 --dataset mnist --checkpoint_dir "./checkpoints/conditional/SM/mnist/" --schedule "linear"
+python SMGM_cond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 1e-4 --dataset cifar10 --checkpoint_dir "./checkpoints/conditional/SM/cifar10/" --schedule "cosine"
+
+python FMGM_uncond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 2e-3 --dataset mnist --checkpoint_dir "./checkpoints/unconditional/FM/mnist/" 
+python FMGM_uncond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 1e-4 --dataset cifar10 --checkpoint_dir "./checkpoints/unconditional/FM/cifar10/" 
+python FMGM_cond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 2e-3 --dataset mnist --checkpoint_dir "./checkpoints/conditional/FM/mnist/" 
+python FMGM_cond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 1e-4 --dataset cifar10 --checkpoint_dir "./checkpoints/conditional/FM/cifar10/" 
+
+python BMGM_uncond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 2e-3 --dataset mnist --checkpoint_dir "./checkpoints/unconditional/BM/mnist/" 
+python BMGM_uncond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 1e-4 --dataset cifar10 --checkpoint_dir "./checkpoints/unconditional/BM/cifar10/" 
+python BMGM_cond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 2e-3 --dataset mnist --checkpoint_dir "./checkpoints/conditional/BM/mnist/" 
+python BMGM_cond.py train --epochs 100 --checkpoint_interval 20 --batch_size 64 --learning_rate 1e-4 --dataset cifar10 --checkpoint_dir "./checkpoints/conditional/BM/cifar10/" 
