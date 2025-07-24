@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python
 """
 Generative Unconditional Flow Matching Diffusion Model on simple datasets
@@ -19,6 +20,7 @@ import math
 import argparse
 import numpy as np
 from tqdm import tqdm
+import logging
 
 import torch
 import torch.nn as nn
@@ -85,6 +87,37 @@ class DiffusionProcess:
 
         return {'loss': loss}
 
+    def sample(self, model, n_samples, reverse_steps, dataset, get_sample_history=False,  **kwargs):
+        """
+        Sampling for the Flow Matching Model
+        """
+        if dataset == 'mnist':
+            channels = 1
+        elif dataset == 'cifar10':
+            channels = 3
+
+        shape = (n_samples, channels, 32, 32)
+        # Initialize x_T (the prior sample)
+        xt = torch.randn(shape, device=self.device)
+        all_images = []
+        model.eval()
+        with torch.inference_mode():
+            # Create a time discretization from T to 0
+            t_seq = torch.linspace(self.T, 0, reverse_steps + 1, device=self.device)
+            for i in tqdm(range(reverse_steps)):
+                t_current = t_seq[i]
+                t_next = t_seq[i + 1]
+                dt = t_next - t_current  # dt is negative (reverse time)
+                # Create a batch of current time values for the update.
+                t_batch = torch.full((shape[0],), t_current, device=self.device)
+                t_norm_batch = t_batch / self.T
+
+                xt = xt + (self.T / reverse_steps) * model(xt, t_norm_batch)
+                
+                if get_sample_history:
+                            all_images.append(xt.clone())
+        return xt if not get_sample_history else torch.stack(all_images)
+
 def create_unet(dataset):
 
     first_layer_embedding = False
@@ -148,7 +181,7 @@ def create_dataloader(dataset, batch_size):
     Returns a DataLoader for the specified dataset.
     """
     if dataset == 'mnist':
-        print('Using MNIST dataset')
+        logging.info('Using MNIST dataset')
         transform = transforms.Compose([
             transforms.Resize(32),
             transforms.CenterCrop(32),
@@ -160,7 +193,7 @@ def create_dataloader(dataset, batch_size):
         dataset_obj = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         dataloader = torch.utils.data.DataLoader(dataset_obj, batch_size=batch_size, shuffle=True)
     elif dataset =='cifar10':
-        print('Using CIFAR10 dataset')
+        logging.info('Using CIFAR10 dataset')
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
@@ -176,7 +209,7 @@ def create_dataloader(dataset, batch_size):
 
 def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint_dir, dataset):
     device = get_device()
-    print('Using device:',device)
+    logging.info('Using device:',device)
 
     # Create objects
     diffusion_process = DiffusionProcess(device=device)
@@ -202,7 +235,7 @@ def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint
 
         avg_loss = running_loss / len(dataloader)
         epoch_losses.append(avg_loss)
-        print(f"Epoch [{epoch}] Average Loss: {avg_loss:.4f}")
+        logging.info(f"Epoch [{epoch}] Average Loss: {avg_loss:.4f}")
 
         # Save a checkpoint every checkpoint_interval epochs.
         if epoch % checkpoint_interval == 0:
@@ -214,15 +247,201 @@ def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint
                 'optimizer_state_dict': optimizer.state_dict(),
                 'epoch_losses': epoch_losses,
             }, checkpoint_path)
-            print("Saved checkpoint to", checkpoint_path)
+            logging.info("Saved checkpoint to", checkpoint_path)
 
-    print("Training finished.")
+    logging.info("Training finished.")
+
+def generate(checkpoint_path, n_samples, reverse_steps, output_path, get_samples_history, dataset):
+    device = get_device()
+    logging.info("Using device:", device)
+
+    # Create the class DiffusionProcess
+    diffusion_process = DiffusionProcess(device=device)
+    # the model will depend on the dataset used
+    model = create_unet(dataset).to(device)
+
+    # Load the checkpoint.
+    with torch.inference_mode():
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+
+        samples = diffusion_process.sample(
+            model=model,
+            n_samples=n_samples,
+            reverse_steps=reverse_steps,
+            dataset=dataset,
+            T=1,
+            get_sample_history=False
+        )
+
+    # # Save images
+    # save_images(samples, output_path, get_samples_history)
+    # logging.info("Saved generated images to", output_path)
+
+def save_images(samples, output_path, get_samples_history=False, dataset = None):
+    """
+    Save a grid of images to output_path. If the samples are 2D (as in a Gaussian mixture),
+    we use matplotlib to create a scatter plot.
+    If get_samples_history is True, also save the full history.
+    """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # If samples are 2D points (either (N,2) or (steps, N,2)), use a scatter plot.
+    float_samples = samples.clone().detach().float()
+    
+    if (float_samples.dim() == 2) or (float_samples.dim() == 3 and float_samples.shape[-1] == 2):
+        # Assume shape (num_samples, 2) or (steps, num_samples, 2)
+        if float_samples.dim() == 3:
+            # Save final samples from the last time step.
+            final_samples = float_samples[-1]
+        else:
+            final_samples = float_samples
+        
+        # clip finale samples to box [-lim, lim]\times [-lim, lim]
+        box_lim = 1.2
+        final_samples = torch.clamp(final_samples, -box_lim, box_lim)
+        plt.figure(figsize=(6, 6))
+        plt.scatter(final_samples[:, 0].cpu(), final_samples[:, 1].cpu(), s=10, alpha=0.6, label="Generated samples")
+        if dataset is not None:
+            # retrieve some samples from the original dataset
+            real_samples = dataset[:final_samples.shape[0]]
+            plt.scatter(real_samples[:, 0].cpu(), real_samples[:, 1].cpu(), s=10, alpha=0.6, label="Real samples")
+        plt.title("Generated 2D Gaussian Mixture")
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.xlim(-box_lim, box_lim)
+        plt.ylim(-box_lim, box_lim)
+        plt.legend()
+        plt.savefig(output_path, bbox_inches='tight')
+        plt.close()
+        if get_samples_history and float_samples.dim() == 3:
+            history_dir = os.path.splitext(output_path)[0] + "_history"
+            os.makedirs(history_dir, exist_ok=True)
+            for i, step_samples in enumerate(float_samples):
+                plt.figure(figsize=(6, 6))
+                plt.scatter(step_samples[:, 0].cpu(), step_samples[:, 1].cpu(), s=10, alpha=0.6)
+                plt.title(f"Step {i}")
+                plt.xlabel("x")
+                plt.ylabel("y")
+                step_path = os.path.join(history_dir, f"step_{i:04d}.png")
+                plt.savefig(step_path)
+                plt.close()
+    else:
+        # Otherwise, assume images and use torchvision’s utility.
+        if get_samples_history:
+            final_samples = float_samples[-1]
+            vutils.save_image(final_samples, output_path, nrow=int(math.sqrt(final_samples.size(0))), normalize=True)
+            history_dir = os.path.splitext(output_path)[0] + "_history"
+            os.makedirs(history_dir, exist_ok=True)
+            for i, step_samples in enumerate(float_samples):
+                step_path = os.path.join(history_dir, f"step_{i:04d}.png")
+                vutils.save_image(step_samples, step_path, nrow=int(math.sqrt(step_samples.size(0))), normalize=True)
+        else:
+            vutils.save_image(float_samples, output_path, nrow=int(math.sqrt(float_samples.size(0))), normalize=True)
+
+
+
+def compute_fid(checkpoint_path, num_samples, reverse_steps, dataset):
+    device = get_device()
+    logging.info("Using device:", device)
+
+    # Create the class DiffusionProcess
+    diffusion_process = DiffusionProcess(device=device)
+    # the model will depend on the dataset used
+    model = create_unet(dataset).to(device)
+
+    # Load the checkpoint.
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+
+
+    if dataset == 'mnist':
+        # Transformation for the MNIST
+        transform = transforms.Compose([
+            transforms.Resize((299, 299)),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x.clamp(0, 1))
+        ])
+
+        # Load the test dataset from MNIST
+        test_dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
+
+    else:
+        # Tranformation for the CIFAR10
+        transform = transforms.Compose([
+            transforms.Resize(299),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x.clamp(0, 1))
+        ])
+
+        # Download the dataset
+        test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
+
+    total_samples = num_samples
+    batch_size = 64
+    num_batches = total_samples // batch_size
+
+    generated_images = []
+
+    # Generate all batches
+    for batch_idx in range(num_batches):
+        logging.info(f"Generating batch {batch_idx + 1}/{num_batches}")
+        samples = diffusion_process.sample(
+            model=model,
+            n_samples=batch_size,
+            reverse_steps=reverse_steps,
+            dataset=dataset,
+            T=1,
+            get_sample_history=False
+        )
+        final_step_images = torch.stack([torch.tensor(s).cpu() for s in samples])
+        # Normalize images to [0, 1]
+        final_step_images = (final_step_images - final_step_images.min()) / (final_step_images.max() - final_step_images.min())
+        generated_images.append(final_step_images)
+
+    # Stack all generated images
+    generated_images = torch.cat(generated_images, dim=0)
+    # print(f"Generated images shape: {generated_images.shape}")
+
+    fid = tm.image.fid.FrechetInceptionDistance(feature=2048).to(device)
+
+
+    for batch in test_loader:
+        images, _ = batch
+        if images.shape[1] == 1:  # if grayscale, repeat channels
+            images = images.repeat(1, 3, 1, 1)
+            # print(f"Fake:{images.min()}, {images.max()}")
+        images = (images * 255).clamp(0, 255).to(torch.uint8)
+        fid.update(images.to(device), real=True)
+
+    # Resize generated images
+    generated_images = F.interpolate(generated_images, size=(299, 299), mode='bilinear', align_corners=False)
+
+    # Make fake_loader
+    fake_dataset = torch.utils.data.TensorDataset(generated_images)
+    fake_loader = torch.utils.data.DataLoader(fake_dataset, batch_size=64, shuffle=False)
+
+    for batch in fake_loader:
+        (images,) = batch
+        if images.shape[1] == 1:  # if grayscale, repeat channels
+            images = images.repeat(1, 3, 1, 1)
+            # print(f"Fake:{images.min()}, {images.max()}")
+        images = (images * 255).clamp(0, 255).to(torch.uint8)
+        fid.update(images.to(device), real=False)
+
+    logging.info(f"FID Score: {fid_score.item()}")
+    fid_score = fid.compute()
+
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Unconditional Flow Matching Diffusion Training Script")
     
-    subparsers = parser.add_subparsers(dest="command", help="Commands: train")
+    subparsers = parser.add_subparsers(dest="command", help="Commands: train, generate or fid")
 
     # Sub-parser for training.
     train_parser = subparsers.add_parser("train", help="Train the model")
@@ -233,15 +452,49 @@ if __name__ == '__main__':
     train_parser.add_argument("--dataset", type=str, help="Dataset to use", choices=["mnist", "cifar10"])
     train_parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints/unconditional/FM/", help="Directory to save checkpoints")
 
+    # Sub-parser for generation.
+    gen_parser = subparsers.add_parser("generate", help="Generate images using a checkpoint")
+    gen_parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to the checkpoint file")
+    gen_parser.add_argument("--num_samples", type=int, default=16, help="Number of images to generate ")
+    gen_parser.add_argument("--reverse_steps", type=int, default=500, help="Number of reverse diffusion steps (T)")
+    gen_parser.add_argument("--output_path", type=str, default="generated.png", help="Path to save the generated image grid")
+    gen_parser.add_argument("--get_samples_history", action="store_true", help="Save the full generation history")
+    gen_parser.add_argument("--dataset", type=str, help="Dataset to use", choices=["mnist", "cifar10"])
+
+    # Sub-parser for fid
+    gen_parser = subparsers.add_parser("fid", help="Compute the FID score")
+    gen_parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to the checkpoint file")
+    gen_parser.add_argument("--num_samples", type=int, default=1000, help="Number of samples to generate")
+    gen_parser.add_argument("--reverse_steps", type=int, default=500, help="Number of reverse diffusion steps (T)") 
+    gen_parser.add_argument("--dataset", type=str, help="Dataset to use", choices=["mnist", "cifar10"])
+
+
     args = parser.parse_args()
 
-    train(
+    if args.command == "train":
+        train(
             num_epochs=args.epochs,
             checkpoint_interval=args.checkpoint_interval,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
             checkpoint_dir=args.checkpoint_dir,
             dataset=args.dataset
+            )
+    elif args.command == "generate":
+        generate(
+            checkpoint_path=args.checkpoint_path,
+            n_samples=args.n_samples,
+            reverse_steps=args.reverse_steps,
+            output_path=args.output_path,
+            get_samples_history=args.get_samples_history,
+            dataset=args.dataset
         )
+    elif args.command == "fid":
+        compute_fid(
+            checkpoint_path=args.checkpoint_path,
+            num_samples=args.num_samples,
+            reverse_steps=args.reverse_steps,
+            dataset=args.dataset
+        )  
     
     parser.print_help()

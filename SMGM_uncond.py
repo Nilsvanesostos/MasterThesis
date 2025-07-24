@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python
 """
 Generative Unconditional Score Matching Diffusion Model on simple datasets
@@ -12,7 +13,7 @@ This script demostrates:
 Usage:
   For training:
     For MNIST:
-      python SMGM_uncond.py train --epochs 20 --checkpoint_interval 5 --batch_size 64 --learning_rate 2e-3 --dataset "mnist" --checkpoint_dir "./checkpoints/unconditional/SM/mnist/" --schedule "linear"
+      python SMGM_uncond.py train --epochs 500 --checkpoint_interval 50 --batch_size 64 --learning_rate 2e-3 --dataset "mnist" --checkpoint_dir "./checkpoints/unconditional/SM/mnist/" --schedule "linear"
     For CIFAR10:
       python SMGM_uncond.py train --epochs 20 --checkpoint_interval 5 --batch_size 64 --learning_rate 1e-4 --dataset "cifar10" --checkpoint_dir "./checkpoints/unconditional/SM/cifar10/" --schedule "cosine"
   For generation:   # checkpoint_path, n_samples, reverse_steps, schedule, interpolant, output_path, get_samples_history, dataset
@@ -33,6 +34,7 @@ import math
 import argparse
 import numpy as np
 from tqdm import tqdm
+import logging
 
 import torch
 import torch.nn as nn
@@ -160,8 +162,6 @@ class DiffusionProcess:
             channels = 1
         elif dataset == 'cifar10':
             channels = 3
-        else:
-            raise ValueError("Unknown dataset")
 
         shape = (n_samples, channels, 32, 32)
         # Initialize x_T (the prior sample)
@@ -193,8 +193,6 @@ class DiffusionProcess:
                     z = torch.randn_like(xt)
                     xt = xt + (f - (g**2) * score) * dt + g * torch.sqrt(-dt) * z
 
-                else:
-                    raise("Unknown interpolant")
                 
                 if get_sample_history:
                             all_images.append(xt.clone())
@@ -264,7 +262,7 @@ def create_dataloader(dataset, batch_size):
     Returns a DataLoader for the specified dataset.
     """
     if dataset == 'mnist':
-        print('Using MNIST dataset')
+        logging.info('Using MNIST dataset')
         transform = transforms.Compose([
             transforms.Resize(32),
             transforms.CenterCrop(32),
@@ -276,7 +274,7 @@ def create_dataloader(dataset, batch_size):
         dataset_obj = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         dataloader = torch.utils.data.DataLoader(dataset_obj, batch_size=batch_size, shuffle=True)
     elif dataset =='cifar10':
-        print('Using CIFAR10 dataset')
+        logging.info('Using CIFAR10 dataset')
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
@@ -285,14 +283,13 @@ def create_dataloader(dataset, batch_size):
 
         dataset_obj = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
         dataloader = torch.utils.data.DataLoader(dataset_obj, batch_size=batch_size, shuffle=True)
-    else:
-        raise ValueError(f"Unknown dataset: {dataset}")
+
     return dataloader
 
 
 def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint_dir, dataset, schedule):
     device = get_device()
-    print('Using device:',device)
+    logging.info('Using device:',device)
 
     # Create objects
     diffusion_process = DiffusionProcess(device=device)
@@ -318,7 +315,7 @@ def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint
 
         avg_loss = running_loss / len(dataloader)
         epoch_losses.append(avg_loss)
-        print(f"Epoch [{epoch}] Average Loss: {avg_loss:.4f}")
+        logging.info(f"Epoch [{epoch}] Average Loss: {avg_loss:.4f}")
 
         # Save a checkpoint every checkpoint_interval epochs.
         if epoch % checkpoint_interval == 0:
@@ -330,13 +327,13 @@ def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint
                 'optimizer_state_dict': optimizer.state_dict(),
                 'epoch_losses': epoch_losses,
             }, checkpoint_path)
-            print("Saved checkpoint to", checkpoint_path)
+            logging.info("Saved checkpoint to", checkpoint_path)
 
-    print("Training finished.")
+    logging.info("Training finished.")
 
 def generate(checkpoint_path, n_samples, reverse_steps, schedule, interpolant, output_path, get_samples_history, dataset):
     device = get_device()
-    print("Using device:", device)
+    logging.info("Using device:", device)
 
     # Create the class DiffusionProcess
     diffusion_process = DiffusionProcess(device=device)
@@ -360,9 +357,9 @@ def generate(checkpoint_path, n_samples, reverse_steps, schedule, interpolant, o
             get_sample_history=False
         )
 
-    # Save images
-    save_images(samples, output_path, get_samples_history)
-    print("Saved generated images to", output_path)
+    # # Save images
+    # save_images(samples, output_path, get_samples_history)
+    # logging.info("Saved generated images to", output_path)
 
 def save_images(samples, output_path, get_samples_history=False, dataset = None):
     """
@@ -429,7 +426,7 @@ def save_images(samples, output_path, get_samples_history=False, dataset = None)
 
 def compute_fid(checkpoint_path, num_samples, reverse_steps, schedule, interpolant, dataset):
     device = get_device()
-    print("Using device:", device)
+    logging.info("Using device:", device)
 
     # Create the class DiffusionProcess
     diffusion_process = DiffusionProcess(device=device)
@@ -474,7 +471,7 @@ def compute_fid(checkpoint_path, num_samples, reverse_steps, schedule, interpola
 
     # Generate all batches
     for batch_idx in range(num_batches):
-        print(f"Generating batch {batch_idx + 1}/{num_batches}")
+        logging.info(f"Generating batch {batch_idx + 1}/{num_batches}")
         samples = diffusion_process.sample(
             model=model,
             n_samples=batch_size,
@@ -520,14 +517,14 @@ def compute_fid(checkpoint_path, num_samples, reverse_steps, schedule, interpola
         images = (images * 255).clamp(0, 255).to(torch.uint8)
         fid.update(images.to(device), real=False)
 
-    print(f"FID Score: {fid_score.item()}")
+    logging.info(f"FID Score: {fid_score.item()}")
     fid_score = fid.compute()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Unconditional Score Matching Diffusion Training Script")
     
-    subparsers = parser.add_subparsers(dest="command", help="Commands: train")
+    subparsers = parser.add_subparsers(dest="command", help="Commands: train, generate or fid")
 
     # Sub-parser for training.
     train_parser = subparsers.add_parser("train", help="Train the model")
