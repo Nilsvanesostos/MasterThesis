@@ -31,6 +31,8 @@ import torchvision
 from torchvision import datasets, transforms
 import torchvision.utils as vutils
 
+from torchmetrics.image.fid import FrechetInceptionDistance
+
 import utils.unet as unet
 
 import matplotlib.pyplot as plt
@@ -209,7 +211,7 @@ def create_dataloader(dataset, batch_size):
 
 def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint_dir, dataset):
     device = get_device()
-    logging.info('Using device:',device)
+    logging.info(f'Using device: {device}')
 
     # Create objects
     diffusion_process = DiffusionProcess(device=device)
@@ -247,13 +249,13 @@ def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint
                 'optimizer_state_dict': optimizer.state_dict(),
                 'epoch_losses': epoch_losses,
             }, checkpoint_path)
-            logging.info("Saved checkpoint to", checkpoint_path)
+            logging.info(f"Saved checkpoint to {checkpoint_path}")
 
     logging.info("Training finished.")
 
 def generate(checkpoint_path, n_samples, reverse_steps, output_path, get_samples_history, dataset):
     device = get_device()
-    logging.info("Using device:", device)
+    logging.info(f"Using device: {device}")
 
     # Create the class DiffusionProcess
     diffusion_process = DiffusionProcess(device=device)
@@ -344,7 +346,7 @@ def save_images(samples, output_path, get_samples_history=False, dataset = None)
 
 def compute_fid(checkpoint_path, num_samples, reverse_steps, dataset):
     device = get_device()
-    logging.info("Using device:", device)
+    logging.info(f"Using device: {device}")
 
     # Create the class DiffusionProcess
     diffusion_process = DiffusionProcess(device=device)
@@ -407,7 +409,7 @@ def compute_fid(checkpoint_path, num_samples, reverse_steps, dataset):
     generated_images = torch.cat(generated_images, dim=0)
     # print(f"Generated images shape: {generated_images.shape}")
 
-    fid = tm.image.fid.FrechetInceptionDistance(feature=2048).to(device)
+    fid = FrechetInceptionDistance(feature=2048).to(device)
 
 
     for batch in test_loader:
@@ -439,6 +441,16 @@ def compute_fid(checkpoint_path, num_samples, reverse_steps, dataset):
 
 
 if __name__ == '__main__':
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler("training_log.txt", mode='a'),       # saves to file # a for appending more info
+            logging.StreamHandler()                        # prints to stdout
+        ]
+    )
+    
     parser = argparse.ArgumentParser(description="Unconditional Flow Matching Diffusion Training Script")
     
     subparsers = parser.add_subparsers(dest="command", help="Commands: train, generate or fid")
@@ -461,12 +473,12 @@ if __name__ == '__main__':
     gen_parser.add_argument("--get_samples_history", action="store_true", help="Save the full generation history")
     gen_parser.add_argument("--dataset", type=str, help="Dataset to use", choices=["mnist", "cifar10"])
 
-    # Sub-parser for fid
-    gen_parser = subparsers.add_parser("fid", help="Compute the FID score")
-    gen_parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to the checkpoint file")
-    gen_parser.add_argument("--num_samples", type=int, default=1000, help="Number of samples to generate")
-    gen_parser.add_argument("--reverse_steps", type=int, default=500, help="Number of reverse diffusion steps (T)") 
-    gen_parser.add_argument("--dataset", type=str, help="Dataset to use", choices=["mnist", "cifar10"])
+    # # Sub-parser for fid
+    # gen_parser = subparsers.add_parser("fid", help="Compute the FID score")
+    # gen_parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to the checkpoint file")
+    # gen_parser.add_argument("--num_samples", type=int, default=1000, help="Number of samples to generate")
+    # gen_parser.add_argument("--reverse_steps", type=int, default=500, help="Number of reverse diffusion steps (T)") 
+    # gen_parser.add_argument("--dataset", type=str, help="Dataset to use", choices=["mnist", "cifar10"])
 
 
     args = parser.parse_args()
@@ -489,12 +501,12 @@ if __name__ == '__main__':
             get_samples_history=args.get_samples_history,
             dataset=args.dataset
         )
-    elif args.command == "fid":
-        compute_fid(
-            checkpoint_path=args.checkpoint_path,
-            num_samples=args.num_samples,
-            reverse_steps=args.reverse_steps,
-            dataset=args.dataset
-        )  
+    # elif args.command == "fid":
+    #     compute_fid(
+    #         checkpoint_path=args.checkpoint_path,
+    #         num_samples=args.num_samples,
+    #         reverse_steps=args.reverse_steps,
+    #         dataset=args.dataset
+    #     )  
     
     parser.print_help()

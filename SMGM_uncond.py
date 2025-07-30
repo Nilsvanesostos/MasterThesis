@@ -47,7 +47,7 @@ import torchvision.utils as vutils
 
 import utils.unet as unet
 
-import tm
+from torchmetrics.metric.fid import FrechetInceptionDistance
 
 import matplotlib.pyplot as plt
 
@@ -179,13 +179,13 @@ class DiffusionProcess:
                 t_batch = torch.full((shape[0],), t_current, device=self.device)
                 t_norm_batch = t_batch / self.T
 
-                beta_t = self.compute_beta_t(t_norm_batch, schedule).view(-1, *([1] * (xt.dim() - 1)))
+                beta_t = self.compute_beta_bar(t_norm_batch, schedule).view(-1, *([1] * (xt.dim() - 1)))
 
                 f = -0.5 * beta_t * xt
                 g = torch.sqrt(beta_t)
 
                 # Get the score (using the nn)
-                score = self.score_fn(model, xt, t_batch)
+                score = self.score_fn(model, xt, t_batch, schedule='linear')
 
                 if interpolant == 'deterninistic':
                     xt = xt + (f - (g**2) * score / 2) * dt
@@ -289,7 +289,7 @@ def create_dataloader(dataset, batch_size):
 
 def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint_dir, dataset, schedule):
     device = get_device()
-    logging.info('Using device:',device)
+    logging.info(f'Using device: {device}')
 
     # Create objects
     diffusion_process = DiffusionProcess(device=device)
@@ -327,13 +327,13 @@ def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint
                 'optimizer_state_dict': optimizer.state_dict(),
                 'epoch_losses': epoch_losses,
             }, checkpoint_path)
-            logging.info("Saved checkpoint to", checkpoint_path)
+            logging.info(f"Saved checkpoint to {checkpoint_path}")
 
     logging.info("Training finished.")
 
 def generate(checkpoint_path, n_samples, reverse_steps, schedule, interpolant, output_path, get_samples_history, dataset):
     device = get_device()
-    logging.info("Using device:", device)
+    logging.info(f"Using device: {device}")
 
     # Create the class DiffusionProcess
     diffusion_process = DiffusionProcess(device=device)
@@ -357,9 +357,9 @@ def generate(checkpoint_path, n_samples, reverse_steps, schedule, interpolant, o
             get_sample_history=False
         )
 
-    # # Save images
-    # save_images(samples, output_path, get_samples_history)
-    # logging.info("Saved generated images to", output_path)
+    # Save images
+    save_images(samples, output_path, get_samples_history)
+    logging.info(f"Saved generated images to {output_path}")
 
 def save_images(samples, output_path, get_samples_history=False, dataset = None):
     """
@@ -426,7 +426,7 @@ def save_images(samples, output_path, get_samples_history=False, dataset = None)
 
 def compute_fid(checkpoint_path, num_samples, reverse_steps, schedule, interpolant, dataset):
     device = get_device()
-    logging.info("Using device:", device)
+    logging.info(f"Using device: {device}")
 
     # Create the class DiffusionProcess
     diffusion_process = DiffusionProcess(device=device)
@@ -491,7 +491,7 @@ def compute_fid(checkpoint_path, num_samples, reverse_steps, schedule, interpola
     generated_images = torch.cat(generated_images, dim=0)
     # print(f"Generated images shape: {generated_images.shape}")
 
-    fid = tm.image.fid.FrechetInceptionDistance(feature=2048).to(device)
+    fid = FrechetInceptionDistance(feature=2048).to(device)
 
 
     for batch in test_loader:
@@ -522,6 +522,16 @@ def compute_fid(checkpoint_path, num_samples, reverse_steps, schedule, interpola
 
 
 if __name__ == '__main__':
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler("./fid/SMGM_deterministic.txt", mode='a'),       # saves to file # a for appending more info
+            logging.StreamHandler()                        # prints to stdout
+        ]
+    )
+    
     parser = argparse.ArgumentParser(description="Unconditional Score Matching Diffusion Training Script")
     
     subparsers = parser.add_subparsers(dest="command", help="Commands: train, generate or fid")

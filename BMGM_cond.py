@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python
 """
 Generative Conditional Bridge Matching Diffusion Model on simple datasets
@@ -19,6 +20,7 @@ import math
 import argparse
 import numpy as np
 from tqdm import tqdm
+import logging
 
 import torch
 import torch.nn as nn
@@ -28,6 +30,8 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import datasets, transforms
 import torchvision.utils as vutils
+
+# from torchmetrics.image.fid import FrechetInceptionDistance
 
 import utils.unet as unet
 
@@ -150,7 +154,7 @@ def create_dataloader(dataset, batch_size):
     Returns a DataLoader for the specified dataset.
     """
     if dataset == 'mnist':
-        print('Using MNIST dataset')
+        logging.info('Using MNIST dataset')
         transform = transforms.Compose([
             transforms.Resize(32),
             transforms.CenterCrop(32),
@@ -162,7 +166,7 @@ def create_dataloader(dataset, batch_size):
         dataset_obj = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         dataloader = torch.utils.data.DataLoader(dataset_obj, batch_size=batch_size, shuffle=True)
     elif dataset =='cifar10':
-        print('Using CIFAR10 dataset')
+        logging.info('Using CIFAR10 dataset')
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
@@ -171,14 +175,13 @@ def create_dataloader(dataset, batch_size):
 
         dataset_obj = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
         dataloader = torch.utils.data.DataLoader(dataset_obj, batch_size=batch_size, shuffle=True)
-    else:
-        raise ValueError(f"Unknown dataset: {dataset}")
+
     return dataloader
 
 
 def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint_dir, dataset):
     device = get_device()
-    print('Using device:',device)
+    logging.info(f'Using device: {device}')
 
     # Create objects
     diffusion_process = DiffusionProcess(device=device)
@@ -205,7 +208,7 @@ def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint
 
         avg_loss = running_loss / len(dataloader)
         epoch_losses.append(avg_loss)
-        print(f"Epoch [{epoch}] Average Loss: {avg_loss:.4f}")
+        logging.info(f"Epoch [{epoch}] Average Loss: {avg_loss:.4f}")
 
         # Save a checkpoint every checkpoint_interval epochs.
         if epoch % checkpoint_interval == 0:
@@ -217,12 +220,20 @@ def train(num_epochs, checkpoint_interval, batch_size, learning_rate, checkpoint
                 'optimizer_state_dict': optimizer.state_dict(),
                 'epoch_losses': epoch_losses,
             }, checkpoint_path)
-            print("Saved checkpoint to", checkpoint_path)
+            logging.info(f"Saved checkpoint to {checkpoint_path}")
 
-    print("Training finished.")
+    logging.info("Training finished.")
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler("BMGM_uncond.txt"),       # saves to file
+            logging.StreamHandler()                        # prints to stdout
+        ]
+    )
     parser = argparse.ArgumentParser(description="Conditional Bridge Matching Diffusion Training Script")
     
     subparsers = parser.add_subparsers(dest="command", help="Commands: train")
